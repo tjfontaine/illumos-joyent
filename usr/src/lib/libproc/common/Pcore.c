@@ -49,6 +49,7 @@
 #include "Pcontrol.h"
 #include "P32ton.h"
 #include "Putil.h"
+#include "Pcore_linux.h"
 
 /*
  * Pcore.c - Code to initialize a ps_prochandle from a core dump.  We
@@ -427,6 +428,205 @@ note_lwpstatus(struct ps_prochandle *P, size_t nbytes)
 
 err:
 	dprintf("Pgrab_core: failed to read NT_LWPSTATUS\n");
+	return (-1);
+}
+
+static void
+prpsinfo32_to_psinfo(prpsinfo32 *p32, psinfo_t *psinfo)
+{
+#define X(arg) \
+	psinfo->pr_##arg = p32->pr_##arg
+
+	X(flag);
+	X(pid);
+	X(ppid);
+	X(uid);
+	X(gid);
+	X(sid);
+#undef X
+	psinfo->pr_pgid = p32->pr_pgrp;
+
+	memcpy(psinfo->pr_fname, p32->pr_fname, sizeof(psinfo->pr_fname));
+	memcpy(psinfo->pr_psargs, p32->pr_psargs, sizeof(psinfo->pr_psargs));
+}
+
+static void
+prpsinfo64_to_psinfo(prpsinfo64 *p64, psinfo_t *psinfo)
+{
+#define X(arg) \
+	psinfo->pr_##arg = p64->pr_##arg
+
+	X(flag);
+	X(pid);
+	X(ppid);
+	X(uid);
+	X(gid);
+	X(sid);
+#undef X
+	psinfo->pr_pgid = p64->pr_pgrp;
+
+	memcpy(psinfo->pr_fname, p64->pr_fname, sizeof(psinfo->pr_fname));
+	memcpy(psinfo->pr_psargs, p64->pr_psargs, sizeof(psinfo->pr_psargs));
+}
+
+static int
+note_linux_psinfo(struct ps_prochandle *P, size_t nbytes)
+{
+	core_info_t *core = P->data;
+	prpsinfo32 p32;
+	prpsinfo64 p64;
+	
+	core->in_linux = 1;
+
+	if (core->core_dmodel == PR_MODEL_ILP32) {
+		if (nbytes < sizeof(p32) ||
+		    read(P->asfd, &p32, sizeof (p32)) != sizeof(p32))
+			goto err;
+	
+		prpsinfo32_to_psinfo(&p32, &P->psinfo);
+	} else {
+		if (nbytes < sizeof(p64) ||
+		    read(P->asfd, &p64, sizeof (p64)) != sizeof(p64))
+			goto err;
+
+		prpsinfo64_to_psinfo(&p64, &P->psinfo);
+	}
+
+
+	P->status.pr_pid = P->psinfo.pr_pid;
+	P->status.pr_ppid = P->psinfo.pr_ppid;
+	P->status.pr_pgid = P->psinfo.pr_pgid;
+	P->status.pr_sid = P->psinfo.pr_sid;
+
+	P->psinfo.pr_nlwp = 0;
+	P->status.pr_nlwp = 0;
+
+	return 0;
+err:
+	dprintf("Pgrab_core: failed to read NT_PSINFO\n");
+	return (-1);
+}
+
+static void
+prstatus64_to_lwp(prstatus64 *prs64, lwp_info_t *lwp)
+{
+	LTIME_TO_TIMESPEC(lwp->lwp_status.pr_utime, prs64->pr_utime);
+	LTIME_TO_TIMESPEC(lwp->lwp_status.pr_stime, prs64->pr_stime);
+
+/* TODO map signals
+	lwp->lwp_status.pr_cursig = prs64->pr_cursig;
+	lwp->lwp_status.pr_lwppend = prs64->pr_sigpend;
+	lwp->lwp_status.pr_lwphold = prs64->pr_sighold;
+*/
+
+	lwp->lwp_status.pr_reg[REG_R15] = prs64->pr_reg.r15;
+	lwp->lwp_status.pr_reg[REG_R14] = prs64->pr_reg.r14;
+	lwp->lwp_status.pr_reg[REG_R13] = prs64->pr_reg.r13;
+	lwp->lwp_status.pr_reg[REG_R12] = prs64->pr_reg.r12;
+	lwp->lwp_status.pr_reg[REG_R11] = prs64->pr_reg.r11;
+	lwp->lwp_status.pr_reg[REG_R10] = prs64->pr_reg.r10;
+	lwp->lwp_status.pr_reg[REG_R9] = prs64->pr_reg.r9;
+	lwp->lwp_status.pr_reg[REG_R8] = prs64->pr_reg.r8;
+
+	lwp->lwp_status.pr_reg[REG_RDI] = prs64->pr_reg.rdi;
+	lwp->lwp_status.pr_reg[REG_RSI] = prs64->pr_reg.rsi;
+	lwp->lwp_status.pr_reg[REG_RBP] = prs64->pr_reg.rbp;
+	lwp->lwp_status.pr_reg[REG_RBX] = prs64->pr_reg.rbx;
+	lwp->lwp_status.pr_reg[REG_RDX] = prs64->pr_reg.rdx;
+	lwp->lwp_status.pr_reg[REG_RCX] = prs64->pr_reg.rcx;
+	lwp->lwp_status.pr_reg[REG_RAX] = prs64->pr_reg.rax;
+
+	lwp->lwp_status.pr_reg[REG_RIP] = prs64->pr_reg.rip;
+	lwp->lwp_status.pr_reg[REG_CS] = prs64->pr_reg.cs;
+	lwp->lwp_status.pr_reg[REG_RSP] = prs64->pr_reg.rsp;
+	lwp->lwp_status.pr_reg[REG_FS] = prs64->pr_reg.fs;
+	lwp->lwp_status.pr_reg[REG_SS] = prs64->pr_reg.ss;
+	lwp->lwp_status.pr_reg[REG_GS] = prs64->pr_reg.gs;
+	lwp->lwp_status.pr_reg[REG_ES] = prs64->pr_reg.es;
+	lwp->lwp_status.pr_reg[REG_DS] = prs64->pr_reg.ds;
+
+	lwp->lwp_status.pr_reg[REG_GSBASE] = prs64->pr_reg.gs_base;
+	lwp->lwp_status.pr_reg[REG_FSBASE] = prs64->pr_reg.fs_base;
+}
+
+static void
+prstatus32_to_lwp(prstatus32 *prs32, lwp_info_t *lwp)
+{
+	LTIME_TO_TIMESPEC(lwp->lwp_status.pr_utime, prs32->pr_utime);
+	LTIME_TO_TIMESPEC(lwp->lwp_status.pr_stime, prs32->pr_stime);
+
+/* TODO map signals
+	lwp->lwp_status.pr_cursig = prs32->pr_cursig;
+	lwp->lwp_status.pr_lwppend = prs32->pr_sigpend;
+	lwp->lwp_status.pr_lwphold = prs32->pr_sighold;
+*/
+
+#define X(ureg, reg) \
+	lwp->lwp_status.pr_reg[ ureg ] = prs32->pr_reg.reg
+
+	X(EBX, ebx);
+	X(ECX, ecx);
+	X(EDX, edx);
+	X(ESI, esi);
+	X(EDI, edi);
+	X(EBP, ebp);
+	X(EAX, eax);
+	X(EIP, eip);
+	X(ESP, esp);
+
+	X(DS, ds);
+	X(ES, es);
+	X(FS, fs);
+	X(GS, gs);
+	X(CS, cs);
+	X(SS, ss);
+
+	X(EFL, eflags);
+#undef X
+}
+
+static int
+note_linux_prstatus(struct ps_prochandle *P, size_t nbytes)
+{
+	core_info_t *core = P->data;
+
+	prstatus64 prs64;
+	prstatus32 prs32;
+	lwp_info_t *lwp;
+	lwpid_t tid;
+
+	core->in_linux = 1;
+
+	if (core->core_dmodel == PR_MODEL_ILP32) {
+		if (nbytes < sizeof(prs32) ||
+		    read(P->asfd, &prs32, sizeof(prs32)) != nbytes)
+			goto err;
+		tid = prs32.pr_pid;
+	} else {
+		if (nbytes < sizeof(prs64) ||
+		    read(P->asfd, &prs64, sizeof(prs64)) != nbytes)
+			goto err;
+		tid = prs64.pr_pid;
+	}
+
+	if ((lwp = lwpid2info(P, tid)) == NULL) {
+		dprintf("Pgrab_core: failed to add lwpid2info linux_prstatus\n");
+		return (-1);
+	}
+
+	P->psinfo.pr_nlwp++;
+	P->status.pr_nlwp++;
+
+	lwp->lwp_status.pr_lwpid = tid;
+
+	if (core->core_dmodel == PR_MODEL_ILP32)
+		prstatus32_to_lwp(&prs32, lwp);
+	else
+		prstatus64_to_lwp(&prs64, lwp);
+
+	return 0;
+err:
+	dprintf("Pgrab_core: failed to read NT_PRSTATUS\n");
 	return (-1);
 }
 
@@ -925,9 +1125,9 @@ note_notsup(struct ps_prochandle *P, size_t nbytes)
  */
 static int (*nhdlrs[])(struct ps_prochandle *, size_t) = {
 	note_notsup,		/*  0	unassigned		*/
-	note_notsup,		/*  1	NT_PRSTATUS (old)	*/
+	note_linux_prstatus,		/*  1	NT_PRSTATUS (old)	*/
 	note_notsup,		/*  2	NT_PRFPREG (old)	*/
-	note_notsup,		/*  3	NT_PRPSINFO (old)	*/
+	note_linux_psinfo,		/*  3	NT_PRPSINFO (old)	*/
 #ifdef __sparc
 	note_xreg,		/*  4	NT_PRXREG		*/
 #else
@@ -1040,7 +1240,7 @@ core_add_mapping(struct ps_prochandle *P, GElf_Phdr *php)
 	core_info_t *core = P->data;
 	prmap_t pmap;
 
-	dprintf("mapping base %llx filesz %llu memsz %llu offset %llu\n",
+	dprintf("mapping base %llx filesz %llx memsz %llx offset %llx\n",
 	    (u_longlong_t)php->p_vaddr, (u_longlong_t)php->p_filesz,
 	    (u_longlong_t)php->p_memsz, (u_longlong_t)php->p_offset);
 
@@ -2164,7 +2364,7 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 	 * If we couldn't find anything of type PT_NOTE, or only one PT_NOTE
 	 * was present, abort.  The core file is either corrupt or too old.
 	 */
-	if (notes == 0 || notes == 1) {
+	if (notes == 0) {
 		*perr = G_NOTE;
 		goto err;
 	}
@@ -2233,6 +2433,7 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 		 */
 		if (nhdr.n_type < sizeof (nhdlrs) / sizeof (nhdlrs[0])) {
 			if (nhdlrs[nhdr.n_type](P, nhdr.n_descsz) < 0) {
+				dprintf("handler for type %d returned < 0", nhdr.n_type);
 				*perr = G_NOTE;
 				goto err;
 			}
@@ -2254,6 +2455,44 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 		 * we have left to process.
 		 */
 		nleft -= sizeof (nhdr) + namesz + nhdr.n_descsz;
+	}
+
+	if (core_info->in_linux == 1) {
+		size_t tcount, pid, tid;
+		lwp_info_t *lwp;
+
+		dprintf("linux core_dmodel = %s\n", core_info->core_dmodel == PR_MODEL_ILP32 ? "ia32" : "amd64");
+		P->status.pr_dmodel = core_info->core_dmodel;
+		/* core_info->core_content |= CC_CONTENT_TEXT; */
+
+		pid = P->status.pr_pid;
+
+		if((lwp = lwpid2info(P, pid)) == NULL) {
+			dprintf("Couldn't find first thread\n");
+			*perr = G_STRANGE;
+			goto err;
+		}
+
+		/* set representative thread */
+		memcpy(&P->status.pr_lwp, &lwp->lwp_status, sizeof(P->status.pr_lwp));
+
+		lwp = list_next(&core_info->core_lwp_head);
+
+		/*
+ 		 * things like mdb v8 expect the first thread to actually have an id
+ 		 * of 1, on linux that is actually the pid -- so if our tid matches our pid
+ 		 * set it as 1, otherwise count up from there.
+ 		 */
+		for (tid = 2, tcount = 0; tcount < core_info->core_nlwp; tcount++, lwp = list_next(lwp)) {
+			if (lwp->lwp_id == P->psinfo.pr_pid) {
+				lwp->lwp_id = 1;
+				lwp->lwp_status.pr_lwpid = 1;
+			} else {
+				lwp->lwp_id = tid;
+				lwp->lwp_status.pr_lwpid = tid;
+				++tid;
+			}
+		}
 	}
 
 	if (nleft != 0) {
@@ -2375,7 +2614,8 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 	 * If we're a statically linked executable, then just locate the
 	 * executable's text and data and name them after the executable.
 	 */
-	if (base_addr == (uintptr_t)-1L) {
+	if (base_addr == (uintptr_t)-1L || core_info->in_linux) {
+		dprintf("looking for text and data: %s\n", execname);
 		map_info_t *tmp, *dmp;
 		file_info_t *fp;
 		rd_loadobj_t rl;

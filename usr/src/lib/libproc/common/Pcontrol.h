@@ -167,6 +167,7 @@ typedef struct core_info {	/* information specific to core files */
 	struct ssd *core_ldt;	/* LDT entries from core file */
 	uint_t core_nldt;	/* number of LDT entries in core file */
 #endif
+	int in_linux;
 } core_info_t;
 
 typedef struct elf_file_header { /* extended ELF header */
