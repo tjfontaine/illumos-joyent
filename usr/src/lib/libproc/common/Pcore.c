@@ -1115,7 +1115,7 @@ err:
 static int
 note_notsup(struct ps_prochandle *P, size_t nbytes)
 {
-	dprintf("skipping unsupported note type\n");
+	dprintf("skipping unsupported note type, should read %d bytes\n", nbytes);
 	return (0);
 }
 
@@ -2351,6 +2351,9 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 				goto err;
 			}
 			break;
+		default:
+			dprintf("Pgrab_core: unknown phdr %d\n", phdr.p_type);
+			break;
 		}
 
 		php = (char *)php + core.e_hdr.e_phentsize;
@@ -2394,7 +2397,10 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 	 */
 	for (nleft = note_phdr.p_filesz; nleft > 0; ) {
 		Elf64_Nhdr nhdr;
-		off64_t off, namesz;
+		off64_t off, namesz, descsz;
+
+		off = lseek64(P->asfd, (off64_t)0L, SEEK_CUR);
+		dprintf("loop start offset is %x\n", off);
 
 		/*
 		 * Although <sys/elf.h> defines both Elf32_Nhdr and Elf64_Nhdr
@@ -2417,6 +2423,7 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 		 * the name field and the padding to 4-byte alignment.
 		 */
 		namesz = P2ROUNDUP((off64_t)nhdr.n_namesz, (off64_t)4);
+
 		if (lseek64(P->asfd, namesz, SEEK_CUR) == (off64_t)-1) {
 			dprintf("failed to seek past name and padding\n");
 			*perr = G_STRANGE;
@@ -2427,23 +2434,28 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 		    nhdr.n_type, nhdr.n_namesz, nhdr.n_descsz);
 
 		off = lseek64(P->asfd, (off64_t)0L, SEEK_CUR);
+		dprintf("current offset is %x\n", off);
 
 		/*
 		 * Invoke the note handler function from our table
 		 */
 		if (nhdr.n_type < sizeof (nhdlrs) / sizeof (nhdlrs[0])) {
+			dprintf("checking handler for type %d\n", nhdr.n_type);
 			if (nhdlrs[nhdr.n_type](P, nhdr.n_descsz) < 0) {
 				dprintf("handler for type %d returned < 0", nhdr.n_type);
 				*perr = G_NOTE;
 				goto err;
 			}
-		} else
+		} else {
+			dprintf("we can't handle type %d -- size %d\n", nhdr.n_type, nhdr.n_descsz);
 			(void) note_notsup(P, nhdr.n_descsz);
+		}
 
 		/*
 		 * Seek past the current note data to the next Elf_Nhdr
 		 */
-		if (lseek64(P->asfd, off + nhdr.n_descsz,
+		descsz = P2ROUNDUP((off64_t)nhdr.n_descsz, (off64_t)4);
+		if (lseek64(P->asfd, off + descsz,
 		    SEEK_SET) == (off64_t)-1) {
 			dprintf("Pgrab_core: failed to seek to next nhdr\n");
 			*perr = G_STRANGE;
@@ -2454,7 +2466,7 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 		 * Subtract the size of the header and its data from what
 		 * we have left to process.
 		 */
-		nleft -= sizeof (nhdr) + namesz + nhdr.n_descsz;
+		nleft -= sizeof (nhdr) + namesz + descsz;
 	}
 
 	if (core_info->in_linux == 1) {
