@@ -30,7 +30,7 @@ typedef struct prpsinfo_32 {       /* Information about process                 
   char           pr_sname;      /* Char for pr_state                         */
   unsigned char  pr_zomb;       /* Zombie                                    */
   signed char    pr_nice;       /* Nice val                                  */
-  unsigned long  pr_flag;       /* Flags                                     */
+  uint32_t	 pr_flag;       /* Flags                                     */
   uint16_t       pr_uid;        /* User ID                                   */
   uint16_t       pr_gid;        /* Group ID                                  */
   pid_t          pr_pid;        /* Process ID                                */
@@ -67,13 +67,23 @@ typedef struct x64_regs {
 } x64_regs;
 
 typedef struct ia32_regs {
-    uint32_t  ebx, ecx, edx, esi, edi, ebp, eax;
-    uint16_t  ds, __ds, es, __es;
-    uint16_t  fs, __fs, gs, __gs;
-    uint32_t  orig_eax, eip;
-    uint16_t  cs, __cs;
-    uint32_t  eflags, esp;
-    uint16_t  ss, __ss;
+	uint32_t   bx; 
+	uint32_t   cx; 
+	uint32_t   dx; 
+	uint32_t   si; 
+	uint32_t   di; 
+	uint32_t   bp; 
+	uint32_t   ax; 
+	uint32_t   ds; 
+	uint32_t   es; 
+	uint32_t   fs; 
+	uint32_t   gs; 
+	uint32_t   orig_ax;
+	uint32_t   ip; 
+	uint32_t   cs; 
+	uint32_t   flags;
+	uint32_t   sp; 
+	uint32_t   ss; 
 } ia32_regs;
 
 typedef struct elf_siginfo {    /* Information about signal (unused)         */
@@ -82,24 +92,29 @@ typedef struct elf_siginfo {    /* Information about signal (unused)         */
   int32_t si_errno;             /* Errno                                     */
 } elf_siginfo;
 
-typedef struct elf_timeval {    /* Time value with microsecond resolution    */
+typedef struct elf_timeval32 {
+  uint32_t tv_sec;                  /* Seconds                                   */
+  uint32_t tv_usec;                 /* Microseconds                              */
+} elf_timeval32;
+
+typedef struct elf_timeval64 {    /* Time value with microsecond resolution    */
   long tv_sec;                  /* Seconds                                   */
   long tv_usec;                 /* Microseconds                              */
-} elf_timeval;
+} elf_timeval64;
 
 typedef struct prstatus32 {       /* Information about thread; includes CPU reg*/
   elf_siginfo    pr_info;       /* Info associated with signal               */
   uint16_t       pr_cursig;     /* Current signal                            */
-  unsigned long  pr_sigpend;    /* Set of pending signals                    */
-  unsigned long  pr_sighold;    /* Set of held signals                       */
+  uint32_t	pr_sigpend;    /* Set of pending signals                    */
+  uint32_t	pr_sighold;    /* Set of held signals                       */
   pid_t          pr_pid;        /* Process ID                                */
   pid_t          pr_ppid;       /* Parent's process ID                       */
   pid_t          pr_pgrp;       /* Group ID                                  */
   pid_t          pr_sid;        /* Session ID                                */
-  elf_timeval    pr_utime;      /* User time                                 */
-  elf_timeval    pr_stime;      /* System time                               */
-  elf_timeval    pr_cutime;     /* Cumulative user time                      */
-  elf_timeval    pr_cstime;     /* Cumulative system time                    */
+  elf_timeval32    pr_utime;      /* User time                                 */
+  elf_timeval32    pr_stime;      /* System time                               */
+  elf_timeval32    pr_cutime;     /* Cumulative user time                      */
+  elf_timeval32    pr_cstime;     /* Cumulative system time                    */
   ia32_regs      pr_reg;        /* CPU registers                             */
   uint32_t       pr_fpvalid;    /* True if math co-processor being used      */
 } prstatus32;
@@ -113,10 +128,10 @@ typedef struct prstatus64 {       /* Information about thread; includes CPU reg*
   pid_t          pr_ppid;       /* Parent's process ID                       */
   pid_t          pr_pgrp;       /* Group ID                                  */
   pid_t          pr_sid;        /* Session ID                                */
-  elf_timeval    pr_utime;      /* User time                                 */
-  elf_timeval    pr_stime;      /* System time                               */
-  elf_timeval    pr_cutime;     /* Cumulative user time                      */
-  elf_timeval    pr_cstime;     /* Cumulative system time                    */
+  elf_timeval64    pr_utime;      /* User time                                 */
+  elf_timeval64    pr_stime;      /* System time                               */
+  elf_timeval64    pr_cutime;     /* Cumulative user time                      */
+  elf_timeval64    pr_cstime;     /* Cumulative system time                    */
   x64_regs       pr_reg;        /* CPU registers                             */
   uint32_t       pr_fpvalid;    /* True if math co-processor being used      */
 } prstatus64;

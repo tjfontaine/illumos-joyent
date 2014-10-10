@@ -383,7 +383,7 @@ note_pstatus(struct ps_prochandle *P, size_t nbytes)
 	return (0);
 
 err:
-	dprintf("Pgrab_core: failed to read NT_PSTATUS\n");
+	dprintf("Pgrab_core: failed to read NT_PSTATUS, got %d/%d\n", nbytes, sizeof (pstatus_t));
 	return (-1);
 }
 
@@ -561,18 +561,37 @@ prstatus32_to_lwp(prstatus32 *prs32, lwp_info_t *lwp)
 	lwp->lwp_status.pr_lwphold = prs32->pr_sighold;
 */
 
+
 #define X(ureg, reg) \
 	lwp->lwp_status.pr_reg[ ureg ] = prs32->pr_reg.reg
 
-	X(EBX, ebx);
-	X(ECX, ecx);
-	X(EDX, edx);
-	X(ESI, esi);
-	X(EDI, edi);
-	X(EBP, ebp);
-	X(EAX, eax);
-	X(EIP, eip);
-	X(ESP, esp);
+#ifdef __amd64
+	X(REG_GS, gs);
+	X(REG_FS, fs);
+	X(REG_DS, ds);
+	X(REG_ES, es);
+	X(REG_RDI, di);
+	X(REG_RSI, si);
+	X(REG_RBP, bp);
+	X(REG_RBX, bx);
+	X(REG_RDX, dx);
+	X(REG_RCX, cx);
+	X(REG_RAX, ax);
+	X(REG_RIP, ip);
+	X(REG_CS, cs);
+	X(REG_RFL, flags);
+	X(REG_RSP, sp);
+	X(REG_SS, ss);
+#else /* __amd64 */
+	X(EBX, bx);
+	X(ECX, cx);
+	X(EDX, dx);
+	X(ESI, si);
+	X(EDI, di);
+	X(EBP, bp);
+	X(EAX, ax);
+	X(EIP, ip);
+	X(UESP, sp);
 
 	X(DS, ds);
 	X(ES, es);
@@ -581,7 +600,8 @@ prstatus32_to_lwp(prstatus32 *prs32, lwp_info_t *lwp)
 	X(CS, cs);
 	X(SS, ss);
 
-	X(EFL, eflags);
+	X(EFL, flags);
+#endif
 #undef X
 }
 
@@ -597,6 +617,7 @@ note_linux_prstatus(struct ps_prochandle *P, size_t nbytes)
 
 	core->in_linux = 1;
 
+	dprintf("looking for model %d, %d/%d\n", core->core_dmodel, nbytes, sizeof (prs32));
 	if (core->core_dmodel == PR_MODEL_ILP32) {
 		if (nbytes < sizeof(prs32) ||
 		    read(P->asfd, &prs32, sizeof(prs32)) != nbytes)
