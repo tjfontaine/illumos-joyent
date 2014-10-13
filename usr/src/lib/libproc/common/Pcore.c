@@ -2498,7 +2498,38 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 		P->status.pr_dmodel = core_info->core_dmodel;
 		/* core_info->core_content |= CC_CONTENT_TEXT; */
 
+		lwp = list_next(&core_info->core_lwp_head);
+
 		pid = P->status.pr_pid;
+
+		for (tid = 1, tcount = 0; tcount < core_info->core_nlwp; tcount++, lwp = list_next(lwp)) {
+			dprintf("Linux thread with id %d\n", lwp->lwp_id);
+
+			/*
+			* In the case we don't have a valid psinfo (i.e. pid is
+			* 0, probably because of gdb creating the core) assume
+			* lowest pid count is the first thread (what if the
+			* next thread wraps the pid around?)
+			*/
+
+			if (P->status.pr_pid == 0 &&
+				((pid == 0 && lwp->lwp_id > 0 ) ||
+				(lwp->lwp_id < pid))) {
+				pid = lwp->lwp_id;
+			}
+		}
+
+		if (P->status.pr_pid != pid) {
+			dprintf("No valid pid, setting to %d\n", pid);
+			P->status.pr_pid = pid;
+			P->psinfo.pr_pid = pid;
+		}
+
+		/*
+		 * things like mdb v8 expect the first thread to actually have an id
+		 * of 1, on linux that is actually the pid. Find the the thread with our
+		 * process id, and set the id to 1
+		 */
 
 		if((lwp = lwpid2info(P, pid)) == NULL) {
 			dprintf("Couldn't find first thread\n");
@@ -2506,26 +2537,14 @@ Pfgrab_core(int core_fd, const char *aout_path, int *perr)
 			goto err;
 		}
 
+		dprintf("setting representative thread: %d\n", lwp->lwp_id);
+
+		lwp->lwp_id = 1;
+		lwp->lwp_status.pr_lwpid = 1;
+
 		/* set representative thread */
 		memcpy(&P->status.pr_lwp, &lwp->lwp_status, sizeof(P->status.pr_lwp));
 
-		lwp = list_next(&core_info->core_lwp_head);
-
-		/*
- 		 * things like mdb v8 expect the first thread to actually have an id
- 		 * of 1, on linux that is actually the pid -- so if our tid matches our pid
- 		 * set it as 1, otherwise count up from there.
- 		 */
-		for (tid = 2, tcount = 0; tcount < core_info->core_nlwp; tcount++, lwp = list_next(lwp)) {
-			if (lwp->lwp_id == P->psinfo.pr_pid) {
-				lwp->lwp_id = 1;
-				lwp->lwp_status.pr_lwpid = 1;
-			} else {
-				lwp->lwp_id = tid;
-				lwp->lwp_status.pr_lwpid = tid;
-				++tid;
-			}
-		}
 	}
 
 	if (nleft != 0) {
